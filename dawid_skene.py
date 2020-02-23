@@ -23,8 +23,32 @@ def check_time():
         delta = time.time() - now
         now = time.time()
         return delta
-    
-def run(responses, tol=0.00001, max_iter=100, init='average', verbose=False):
+def aggregated_responses(original_labels):
+    all_labels = []
+    for original_label in original_labels:
+        all_labels.extend([l.split(':')[-1] for l in original_label['Label'] if ':' in l])
+        
+    assets = np.array(list(set([label['External ID'] for label in original_labels])))
+    observers = np.array(list(set([label['Created By'] for label in original_labels])))
+    label_ids = np.array(list(set(all_labels)))
+    classes = [False, True]
+    counts = np.zeros((len(label_ids), len(assets), len(observers), 2))
+    #counts[:,:,:,0] = 1
+    assets_lookup = {k:i for i,k in enumerate(assets)}
+    observers_lookup = {k:i for i,k in enumerate(observers)}
+    label_ids_lookup = {k:i for i,k in enumerate(label_ids)}
+    for original_label in original_labels:
+        asset_index = assets_lookup[original_label['External ID']]
+        observer_index = observers_lookup[original_label['Created By']]
+        labels = [l.split(':')[-1] for l in original_label['Label'] if ':' in l]
+        counts[:, asset_index, observer_index, 0] = 1
+        for label in labels:
+            label_index = label_ids_lookup[label]
+            counts[label_index, asset_index, observer_index, 1] = 1
+            counts[label_index, asset_index, observer_index, 0] = 0
+    return assets, observers, label_ids, counts, classes
+        
+def run(responses,assets=None,observers=None,classes=None,counts=None, tol=0.00001, max_iter=100, init='average', verbose=False):
     """
     Function: dawid_skene()
         Run the Dawid-Skene estimator on response data
@@ -37,7 +61,9 @@ def run(responses, tol=0.00001, max_iter=100, init='average', verbose=False):
     # convert responses to counts
     if verbose:
         print ('Start', check_time())
-    (assets, observers, classes, counts) = responses_to_counts(responses)
+    if counts is None or assets is None or observers is None or classes is None:
+        (assets, observers, classes, counts) = responses_to_counts(responses)
+        
     if verbose:
         print ('Finish convert response', check_time())
     # initialize
@@ -247,10 +273,10 @@ def e_step(counts, class_marginals, error_rates):
     [nPatients, nObservers, nClasses] = np.shape(counts)
     patient_classes = np.zeros([nPatients, nClasses])    
     patient_classes += class_marginals.reshape((1,-1))
-    
-    for j in range(nClasses):
-        a = np.power(error_rates[np.newaxis,:,j,:], counts)
-        b = np.prod(a, axis=(1,2))    
+    for j in range(nClasses):                
+        a = np.ones_like(counts) #replace np.power which takes a long time to compute since counts can only be 0 or 1
+        a -= (1 - error_rates[np.newaxis,:,j,:]) * counts        
+        b = np.prod(a, axis=(1,2))   
         patient_classes[:,j] *= b
     
     patient_classes /= patient_classes.sum(axis=1).reshape((-1, 1))      
@@ -314,7 +340,9 @@ def calc_likelihood(counts, class_marginals, error_rates):
     
     for j in range(nClasses): 
         class_prior = class_marginals[j]
-        patient_class_likelihood = np.prod(np.power(error_rates[np.newaxis,:,j,:], counts), axis=(1,2))
+        a = np.ones_like(counts) #replace np.power which takes a long time to compute
+        a -= (1 - error_rates[np.newaxis,:,j,:]) * counts        
+        patient_class_likelihood = np.prod(a, axis=(1,2))
         patient_class_posterior = class_prior * patient_class_likelihood 
         patient_likelihoods[:,j] = patient_class_posterior   
         
