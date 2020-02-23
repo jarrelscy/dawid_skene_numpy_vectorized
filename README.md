@@ -18,6 +18,8 @@ Alternatively, it can be run within a python script as follows:
 > 
 > dawid_skene.run(responses)
 
+Adapted for numpy vectorization
+Also assumes counts (patients x observers x classes) can only be 0 or 1 to speed things up
 
 ### References:
 
